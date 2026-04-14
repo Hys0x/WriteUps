@@ -1,9 +1,9 @@
 
 # FCSC 2026 - PWN - todo
 
-Level: :star::star:  
-Solves during the CTF: 30  
-Description:  
+**Level** : :star::star:  
+**Solves during the CTF** : 30  
+**Description** :  
 J'ai créé un programme pour noter les tâches à ne pas oublier mais j'ai quand même l'impression que ma mémoire me joue des tours...
 
 # TL;DR
@@ -46,13 +46,11 @@ NX:     NX enabled
 PIE:    PIE enabled
 ```
 
-No canary, NX on, PIE on. Dynamically linked against the provided libc 2.41.
-
 ---
 
 # Vulnerabilities
 
-## 1 — Path traversal
+## 1- Path traversal
 
 None of the three operations sanitize the list name. The path is simply:
 
@@ -64,7 +62,7 @@ fopen(&filename, ...)
 
 So `../../../../../../../../proc/self/maps` is a valid "list name". The binary happily opens it.
 
-## 2 — Arbitrary byte write via `/proc/self/mem`
+## 2- Arbitrary byte write via `/proc/self/mem`
 
 `edit_list` computes the file seek position as:
 
@@ -79,7 +77,7 @@ The seek value is `index * 0x51 + 1`. If the file is `/proc/self/mem`, we can pa
 
 # Exploit
 
-Of course, no flag.txt present in the main folder or in the parent folder, it would have been to easy...
+Of course, no flag.txt present in the main folder or in the parent folder, it would have been too easy...
 
 ## Step 1 : Leak PIE and libc via `/proc/self/maps`
 
@@ -148,4 +146,4 @@ p.sendafter(b'> ', payload)
 p.interactive()
 ```
 
-This should give us a shell.
+*Et voilà*.
