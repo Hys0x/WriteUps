@@ -45,10 +45,10 @@ struct ws_session {
 struct ws_session *ws_session_create(struct ws_client *client)
 {
     struct ws_session *s;
-    s = malloc(sizeof(*s));     // ← raw malloc, NO zero-initialization
+    s = malloc(sizeof(*s));     // <- raw malloc, NO zero-initialization
     if (!s)
         return NULL;
-    s->state  = WS_STATE_OPEN;  // ← ONLY field initialized
+    s->state  = WS_STATE_OPEN;  // <- ONLY field initialized
     
     return s;                   // frag_opcode, frag_len, frag_buf = GARBAGE
 }
@@ -66,9 +66,9 @@ struct ws_session *ws_session_create(struct ws_client *client)
   ├──────────────────┼────────┼──────────────────────────────────────────────────────┤
   │ frag_opcode      │ +8     │ tcache key                                           │
   ├──────────────────┼────────┼──────────────────────────────────────────────────────┤
-  │ frag_len         │ +16    │ original chunk bytes [16–23] — attacker-controlled   │
+  │ frag_len         │ +16    │ original chunk bytes [16–23] : attacker-controlled   │
   ├──────────────────┼────────┼──────────────────────────────────────────────────────┤
-  │ frag_buf         │ +24    │ original chunk bytes [24–31] — attacker-controlled   │
+  │ frag_buf         │ +24    │ original chunk bytes [24–31] : attacker-controlled   │
   └──────────────────┴────────┴──────────────────────────────────────────────────────┘
 ```
 
@@ -114,7 +114,7 @@ On the next `CONTINUATION` frame, `realloc` skips reallocation and `memcpy` writ
 
 Before exploiting anything, let's implement the WebSocket protocol to talk to the binary.
 
-WebSocket is a bidirectional protocol that upgrades from HTTP. Data is then wrapped in **frames**:
+WebSocket is a protocol that upgrades from HTTP. Data is then wrapped in **frames**:
 
 ```
 Byte 0: FIN(1 bit) | RSV(3 bits) | Opcode(4 bits)
@@ -245,7 +245,7 @@ These offsets **should** be constant.
 
 ``` sh
 $ checksec --file=wsd
-[*] '/home/kali/training/CTF/2026_FCSC/pwn/wsd/wsd'
+[*] '/home/kali/CTF/2026_FCSC/pwn/wsd/wsd'
     Arch:       amd64-64-little
     RELRO:      Partial RELRO
     Stack:      No canary found
@@ -382,7 +382,7 @@ With `addr = b'\x00'` (null LSB) we land inside the 0x50 tcache chunk that is be
 
 Here is the heap state visible in GDB after Frame 1:
 
-``` sh
+``` py
 pwdbg> vis --all
 
 0x555555564970	0x0000000000000340	0x00000000000000d0	@...............
@@ -499,7 +499,7 @@ log.success(f"Stack leak: {hex(stack_leak)}")
 
 ## Leak 4 — PIE
 
-At offset `__environ - 0x78` there is a saved return address on the stack pointing into the first instruction of `main` function:
+At offset `__environ - 0x78` there is the address of the first instruction of `main` function:
 
 ```
 pwndbg> telescope (0x7fffffffdc08-0x78)
@@ -579,7 +579,7 @@ After two `malloc(0x110)`, the second one returns a chunk at `target_addr`.
 
 Now that we have an arbitrary write, we can setup a ROP chain on the stack.
 
-The target is the return address of `ws_handle_frame` on the stack. We find the offset relative to `__environ`:
+We target is the return address of `ws_handle_frame` on the stack. We find the offset relative to `__environ` using GDB:
 
 ```
 pwndbg> telescope (0x7fffffffdc08-0x260)
