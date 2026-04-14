@@ -15,4 +15,4 @@ Ended up 65th overall and 1st in PWN for my division (Hors Catégorie).
 | Challenge | Category | Description |
 |-----------|----------|-------------|
 | [wsd](./wsd/) | pwn | Heap exploitation of a WebSocket daemon |
-| [todo](./todo/) | pwn | ... |
+| [todo](./todo/) | pwn | Abusing `/proc/self/mem` to turn a single-byte write into RCE |
