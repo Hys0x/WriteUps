@@ -1,24 +1,26 @@
 
 # FCSC 2026 - PWN - wsd
 
-Level : :star: :star:
-Solve during the CTF: 8
-Description :
-Vous avez adoré la trilogie HTTP, je vous présente alors wsd, c'est presque pareil, mais différent.
+**Level** : :star::star:  
+**Solve during the CTF** : 8  
+**Description** :  
+Vous avez adoré la trilogie HTTP, je vous présente alors wsd, c'est presque pareil, mais différent.  
 Récupérez le flag dans /app/flag.txt.
 
 # TL;DR
 
-Exploit an uninitialized heap memory containing a buffer pointer, and its size, to :
-    - leak data (Heap, Libc, Stack and PIE),
-    - tcache poisoning to get arbitrary write,
+Exploit an uninitialized heap memory containing a buffer pointer, and its size, to :  
+- leak data (Heap, Libc, Stack and PIE),
+- tcache poisoning to get arbitrary write,
+
 Finally write a ROP chain on the stack to read the flag and send it back to the client.
 
 # Description
 
 The binary is a TCP server that handles WebSocket connections. 
 
-The protocol is simple: the client sends an HTTP WebSocket upgrade request. If the handshake succeeds, the binary switches to WebSocket mode and **echoes back** every message it receives. It supports **fragmentation**: a message can be split across several frames (opcode `CONTINUATION`), and the binary reassembles them before echoing.
+The protocol is simple: the client sends an HTTP WebSocket upgrade request. If the handshake succeeds, the binary switches to WebSocket mode and **echoes back** every message it receives.  
+It supports **fragmentation**: a message can be split across several frames (opcode `CONTINUATION`), and the binary reassembles them before echoing.
 
 `server_handle_client` implements the main loop:
 1. Read the HTTP request, parse it, attempt the WebSocket handshake.
@@ -54,7 +56,7 @@ struct ws_session *ws_session_create(struct ws_client *client)
 
 `malloc` does not zero memory. `frag_len` and `frag_buf` contain whatever bytes were left in the recycled heap chunk.
 
-`ws_session` is 4×8 = 32 bytes: a **0x30 tcache chunk**.
+`ws_session` is 4×8 = 32 bytes: a **0x30 chunk**.
 
 ```
   ┌──────────────────┬────────┬──────────────────────────────────────────────────────┐
@@ -72,7 +74,7 @@ struct ws_session *ws_session_create(struct ws_client *client)
 
 During HTTP parsing, `strdup` calls for header names/values of 17–32 characters produce `0x30` chunks, which are freed once the handshake is done, whether it is a success or a failure.
 
-By sending a **crafted failing handshake first**, we can populate the `0x30` tcache with a malicious size and pointer.
+By sending a **crafted failing handshake first**, we can populate the `0x30` tcache with a malicious size and pointer.  
 When `ws_session_create` later pops that chunk, the malicious size and pointer are used as `frag_len` and `frag_buf`.
 
 ---
@@ -95,7 +97,7 @@ The second vulnerability is an **integer overflow** in the `CONTINUATION` frame 
     }
 ```
 
-Both `session->frag_len` (`size_t`) and `frame->payload_len` (`uint64_t`) are unsigned 64-bit values. Their addition can wrap around: if `frag_len` is very large (for instance `0xFFFFFFFFFFFFFF8`, achievable through the previous vulnerability), adding a small `payload_len` like 0x48 produces:
+Both `session->frag_len` (`size_t`) and `frame->payload_len` (`uint64_t`) are unsigned 64-bit values. Their addition can wrap around: if `frag_len` is very large (for instance `0xFFFFFFFFFFFFFF8`, through the previous vulnerability), adding a small `payload_len` like 0x48 produces:
 
 ```
 new_len = 0xFFFFFFFFFFFFFFF8 + 0x48 = 0x40   // wraps around mod 2^64
@@ -105,9 +107,10 @@ The size check `new_len > WSD_MAX_FRAME_SIZE`, then:
 - `realloc(frag_buf, 0x40)` allocates a 0x50 chunk,
 - `memcpy(frag_buf + 0xFFFFFFFFFFFFFFF8, payload, 0x48)` pointer arithmetic wraps it to `frag_buf - 8`, writing 8 bytes before the buffer (heap underflow)
 
-The underflow allow us to modify the chunk's size field in the heap metadata. By crafting the payload, we can overwrite it to make realloc believe the buffer is larger than it really is. On the next `CONTINUATION` frame, `realloc` skips reallocation and `memcpy` writes past the real chunk boundary; giving us a heap overflow.
+The underflow allow us to modify the chunk's size field in the heap metadata. By crafting the payload, we can overwrite it to make `realloc` believe the buffer is larger than it really is.  
+On the next `CONTINUATION` frame, `realloc` skips reallocation and `memcpy` writes past the real chunk boundary; giving us a heap overflow.
 
-# Nominal
+# Nominal case
 
 Before exploiting anything, let's implement the WebSocket protocol to talk to the binary.
 
@@ -207,7 +210,7 @@ def ws_recv(tube: tube) -> tuple[int, bytes, bool]:
     return payload
 ```
 
-With those function, we can start the communication with the binary. 
+With those functions, we can start the communication with the binary. 
 
 For instance, the following code:
 
@@ -225,7 +228,7 @@ close(do_log=False)
 Produces the following result:
 
 ``` sh
-$ python3 perso.py REMOTE=localhost:4000
+$ python3 exploit.py REMOTE=localhost:4000
 [*] Server send: b'Hello World'
 ``` 
 
@@ -233,8 +236,10 @@ The binary received two frames, re-assembled them and send the message back to t
 
 # Exploit
 
-To build the exploit, we first work under GDB with ASLR disabled. This lets us identify the relative offsets between values we can leak and the targets we want to reach.
-These offsets **should** be constant. Spoiler: they were not.
+To build the exploit, we first work under GDB with ASLR disabled. This lets us identify the relative offsets between values we can leak and the targets we want to reach.  
+These offsets **should** be constant.  
+
+*Spoiler: they were not*.
 
 ## Protections
 
@@ -276,7 +281,7 @@ With `frag_len = -8` in the session and `frag_buf` pointing to a `0x50` chunk lo
 
 Once the `ws_session` re-use the chunk where we set the forged `frag_len`, we use the following frames:
 
-**Frame 1 — CONTINUATION, FIN=0, 0x48 bytes** — payload = `p64(0x81) + b'W'*0x40`:
+**Frame 1 - CONTINUATION, FIN=0, 0x48 bytes** — payload = `p64(0x81) + b'W'*0x40`:
 
 ```
 new_len = 0xfffffffffffffff8 + 0x48 = 0x40
@@ -304,7 +309,7 @@ The remaining of the payload (`W*0x40`) fills the chunk's data to reallocate int
   └─────────────────────────────────────────────┘
 ```
 
-**Frame 2 — CONTINUATION, FIN=1, 0x30 bytes**:
+**Frame 2 - CONTINUATION, FIN=1, 0x30 bytes**:
 
 Payload :
 ``` sh
@@ -372,7 +377,7 @@ def read_addr(addr):
 We use the previous fonction to leak an address on the heap. To do that, we use the 0x50 chunk in the tcache bins that we placed before `frag_buf`.
 Since this chunk is in a tcache bin (a single linked list) its first 8 bytes hold a forward pointer to the next free chunk in that bin.
 
-For this first leak, we do not overwrite the `frag_buf` entirely, just its 8 LSB.
+For this first leak, we do not overwrite the `frag_buf` pointer entirely, just its 8 LSB.
 With `addr = b'\x00'` (null LSB) we land inside the 0x50 tcache chunk that is before.
 
 Here is the heap state visible in GDB after Frame 1:
@@ -435,7 +440,7 @@ log.info(f"Key leaked: {hex(key)}")
 log.success(f"Heap base page : {hex(heap_base_page)}")
 ```
 
-We can leak the value `0x0000000555555564`.
+We can leak the value `0x0000000555555564`.  
 -> We have a leak of a heap page: `0x555555564 << 12 = 0x55555556400`
 
 ## Leak 2 — Libc
@@ -598,7 +603,7 @@ Stack level 0, frame at 0x7fffffffd9c0:
 We need a ROP chain that:
 1. `open("/app/flag.txt", O_RDONLY)`    -> open the flag
 2. `read(3, heap_buf, 0x100)`           -> read the flag into a heap buffer at a known address
-3. `write(4, heap_buf, 0x100)`          -> send it over the client socket (fd 4, the `accept()`-returned fd)
+3. `write(4, heap_buf, 0x100)`          -> send it over the client socket
 
 We wrote `/app/flag.txt` in our chunk at a known address during the tcache poisoning (`heap_base_page + 0xa90`).
 
